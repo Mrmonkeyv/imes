@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>T-Rex Chrome Runner</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #f8fafc;
+      color: #334155;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    .game-wrapper {
+      position: relative;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+    canvas {
+      display: block;
+      max-width: 95vw;
+    }
+    .hud {
+      position: absolute;
+      top: 14px;
+      right: 20px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #64748b;
+    }
+    .tip {
+      margin-top: 14px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="game-wrapper">
+  <div class="hud">
+    HI <span id="hi">00000</span> <span id="current">00000</span>
+  </div>
+  <canvas id="runner" width="600" height="240"></canvas>
+</div>
+<div class="tip">Space / Up: Jump · Down: Duck · Tap screen on mobile</div>
+
+<script>
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function sound(freq, duration = 0.06) {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+  }
+
+  const canvas = document.getElementById('runner');
+  const ctx = canvas.getContext('2d');
+
+  let state = 'START'; // START, RUNNING, GAMEOVER
+  let speed = 6;
+  let score = 0;
+  let hiScore = parseInt(localStorage.getItem('apex_dino_hi') || '0', 10);
+  document.getElementById('hi').innerText = String(hiScore).padStart(5, '0');
+
+  const dino = {
+    x: 50,
+    y: 170,
+    w: 36,
+    h: 44,
+    vy: 0,
+    gravity: 0.75,
+    jumpPower: -12,
+    isGrounded: true,
+    isDucking: false
+  };
+
+  let obstacles = [];
+  let clouds = [];
+  let groundOffset = 0;
+  let spawnTimer = 0;
+
+  function resetGame() {
+    state = 'RUNNING';
+    speed = 6;
+    score = 0;
+    obstacles = [];
+    clouds = [];
+    dino.y = 170;
+    dino.vy = 0;
+    dino.isGrounded = true;
+    dino.isDucking = false;
+  }
+
+  function jump() {
+    if (state === 'START' || state === 'GAMEOVER') {
+      resetGame();
+      sound(400, 0.05);
+    } else if (state === 'RUNNING' && dino.isGrounded) {
+      dino.vy = dino.jumpPower;
+      dino.isGrounded = false;
+      sound(440, 0.08);
+    }
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      jump();
+    } else if (e.key === 'ArrowDown') {
+      dino.isDucking = true;
+      if (!dino.isGrounded) dino.vy += 3;
+    }
+  });
+
+  window.addEventListener('keyup', e => {
+    if (e.key === 'ArrowDown') {
+      dino.isDucking = false;
+    }
+  });
+
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    jump();
+  });
+
+  function update() {
+    if (state === 'RUNNING') {
+      score += 0.15;
+      speed += 0.0006;
+      document.getElementById('current').innerText = String(Math.floor(score)).padStart(5, '0');
+
+      if (Math.floor(score) > hiScore) {
+        hiScore = Math.floor(score);
+        localStorage.setItem('apex_dino_hi', hiScore.toString());
+        document.getElementById('hi').innerText = String(hiScore).padStart(5, '0');
+      }
+
+      // Dino physics
+      dino.vy += dino.gravity;
+      dino.y += dino.vy;
+      if (dino.y >= 170) {
+        dino.y = 170;
+        dino.vy = 0;
+        dino.isGrounded = true;
+      }
+
+      // Ground scroll
+      groundOffset = (groundOffset + speed) % 24;
+
+      // Cloud spawn
+      if (Math.random() < 0.01) {
+        clouds.push({ x: canvas.width, y: Math.random() * 80 + 20 });
+      }
+      clouds.forEach(c => c.x -= speed * 0.3);
+      clouds = clouds.filter(c => c.x > -60);
+
+      // Obstacle spawn
+      spawnTimer++;
+      if (spawnTimer > 70 + Math.random() * 60) {
+        spawnTimer = 0;
+        const isBird = Math.random() < 0.3 && score > 200;
+        if (isBird) {
+          obstacles.push({
+            type: 'bird',
+            x: canvas.width,
+            y: Math.random() < 0.5 ? 140 : 165,
+            w: 32,
+            h: 24
+          });
+        } else {
+          const count = Math.random() < 0.4 ? 2 : 1;
+          obstacles.push({
+            type: 'cactus',
+            x: canvas.width,
+            y: 172,
+            w: 18 * count,
+            h: 42
+          });
+        }
+      }
+
+      // Move obstacles
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obs = obstacles[i];
+        obs.x -= speed;
+
+        // Hitbox collision
+        const dinoH = dino.isDucking ? 26 : 44;
+        const dinoY = dino.isDucking ? dino.y + 18 : dino.y;
+        if (
+          dino.x + 8 < obs.x + obs.w &&
+          dino.x + dino.w - 8 > obs.x &&
+          dinoY + dinoH > obs.y &&
+          dinoY < obs.y + obs.h
+        ) {
+          state = 'GAMEOVER';
+          sound(180, 0.3);
+        }
+
+        if (obs.x + obs.w < 0) {
+          obstacles.splice(i, 1);
+        }
+      }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Ground line
+    ctx.strokeStyle = '#535353';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 214);
+    ctx.lineTo(canvas.width, 214);
+    ctx.stroke();
+
+    // Ground bumps
+    ctx.fillStyle = '#737373';
+    for (let x = -groundOffset; x < canvas.width; x += 24) {
+      if ((x * 13) % 7 === 0) {
+        ctx.fillRect(x, 218, 6, 2);
+      }
+    }
+
+    // Clouds
+    ctx.fillStyle = '#cbd5e1';
+    clouds.forEach(c => {
+      ctx.fillRect(c.x, c.y, 40, 10);
+      ctx.fillRect(c.x + 8, c.y - 6, 24, 6);
+    });
+
+    // Obstacles
+    obstacles.forEach(obs => {
+      ctx.fillStyle = '#535353';
+      if (obs.type === 'cactus') {
+        ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+        ctx.fillRect(obs.x - 4, obs.y + 8, obs.w + 8, 8);
+      } else {
+        // Pterodactyl
+        ctx.fillRect(obs.x, obs.y + 6, obs.w, 12);
+        ctx.fillRect(obs.x + 10, obs.y - 4, 12, 10);
+      }
+    });
+
+    // Dino
+    ctx.fillStyle = '#535353';
+    const dinoH = dino.isDucking ? 26 : 44;
+    const dinoY = dino.isDucking ? dino.y + 18 : dino.y;
+    ctx.fillRect(dino.x, dinoY, dino.w, dinoH);
+    // Eye
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(dino.x + (dino.isDucking ? 28 : 22), dinoY + 6, 4, 4);
+
+    if (state === 'START') {
+      ctx.fillStyle = '#535353';
+      ctx.font = '16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('PRESS SPACE TO RUN', canvas.width / 2, 110);
+    } else if (state === 'GAMEOVER') {
+      ctx.fillStyle = '#535353';
+      ctx.font = 'bold 22px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('G A M E  O V E R', canvas.width / 2, 100);
+      ctx.font = '14px monospace';
+      ctx.fillText('Press Space to Restart', canvas.width / 2, 130);
+    }
+  }
+
+  requestAnimationFrame(update);
+</script>
+</body>
+</html>

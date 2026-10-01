@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Neon Tunnel Speed 3D</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 500px;
+      max-width: 95vw;
+      margin-bottom: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #ec4899;
+    }
+    canvas {
+      background: #000000;
+      border: 2px solid #ec4899;
+      border-radius: 8px;
+      box-shadow: 0 0 25px rgba(236, 72, 153, 0.3);
+      display: block;
+      max-width: 95vw;
+    }
+    .tip {
+      margin-top: 10px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="hud">
+  <div>Distance: <span id="dist">0</span>m</div>
+  <div>Speed: <span id="speed">120</span> km/h</div>
+  <div>Best: <span id="best">0</span>m</div>
+</div>
+
+<canvas id="slope" width="500" height="420"></canvas>
+<div class="tip">← / → Arrow Keys or A / D to steer · Dodge the red barriers</div>
+
+<script>
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function beep(freq, duration = 0.05) {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+  }
+
+  const canvas = document.getElementById('slope');
+  const ctx = canvas.getContext('2d');
+
+  let shipX = 0; // -1 to 1
+  let shipVX = 0;
+  let distance = 0;
+  let speed = 120;
+  let best = parseInt(localStorage.getItem('apex_slope_best') || '0', 10);
+  document.getElementById('best').innerText = best;
+
+  let obstacles = [];
+  let isGameOver = false;
+
+  function resetGame() {
+    shipX = 0;
+    shipVX = 0;
+    distance = 0;
+    speed = 120;
+    obstacles = [];
+    isGameOver = false;
+    document.getElementById('dist').innerText = '0';
+    document.getElementById('speed').innerText = '120';
+  }
+
+  let keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (e.key === 'r' || e.key === 'R') resetGame();
+  });
+  window.addEventListener('keyup', e => keys[e.key] = false);
+
+  function spawnObstacle() {
+    obstacles.push({
+      z: 1000,
+      x: (Math.random() - 0.5) * 1.6,
+      w: 0.35,
+      h: 0.25
+    });
+  }
+
+  let spawnTimer = 0;
+  function update() {
+    if (!isGameOver) {
+      distance += Math.floor(speed / 30);
+      speed = Math.min(320, 120 + distance * 0.05);
+
+      document.getElementById('dist').innerText = distance;
+      document.getElementById('speed').innerText = Math.floor(speed);
+
+      if (distance > best) {
+        best = distance;
+        localStorage.setItem('apex_slope_best', best.toString());
+        document.getElementById('best').innerText = best;
+      }
+
+      // Steer ship
+      if (keys['ArrowLeft'] || keys['a']) shipVX -= 0.006;
+      if (keys['ArrowRight'] || keys['d']) shipVX += 0.006;
+
+      shipVX *= 0.88;
+      shipX += shipVX;
+      shipX = Math.max(-0.9, Math.min(0.9, shipX));
+
+      // Spawn
+      spawnTimer++;
+      if (spawnTimer > Math.max(18, 50 - Math.floor(distance / 80))) {
+        spawnTimer = 0;
+        spawnObstacle();
+      }
+
+      // Obstacles update
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obs = obstacles[i];
+        obs.z -= speed * 0.12;
+
+        // Collision test at player Z (approx z: 80 to 140)
+        if (obs.z < 140 && obs.z > 80) {
+          if (Math.abs(obs.x - shipX) < obs.w / 2 + 0.12) {
+            isGameOver = true;
+            beep(100, 0.4);
+          }
+        }
+
+        if (obs.z < 20) {
+          obstacles.splice(i, 1);
+        }
+      }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function draw() {
+    ctx.fillStyle = '#05030a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height * 0.45;
+
+    // Pseudo-3D Tunnel Lines
+    ctx.strokeStyle = '#ec4899';
+    ctx.lineWidth = 1.5;
+
+    // Horizon
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.lineTo(canvas.width, cy);
+    ctx.stroke();
+
+    // Perspective floor lines
+    const lanes = [-1.2, -0.8, -0.4, 0, 0.4, 0.8, 1.2];
+    lanes.forEach(lx => {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + lx * 320, canvas.height);
+      ctx.stroke();
+    });
+
+    // Horizontal speed rings
+    const zOffset = (distance * 2) % 60;
+    for (let d = 0; d < 360; d += 40) {
+      const z = (d + zOffset) / 400;
+      const y = cy + Math.pow(z, 2) * (canvas.height - cy);
+      const w = z * 640;
+      ctx.strokeStyle = `rgba(236, 72, 153, ${z * 0.8})`;
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 2, y);
+      ctx.lineTo(cx + w / 2, y);
+      ctx.stroke();
+    }
+
+    // Draw Obstacles (sorted back to front)
+    obstacles.slice().sort((a, b) => b.z - a.z).forEach(obs => {
+      const scale = 200 / obs.z;
+      const ox = cx + obs.x * 240 * scale;
+      const oy = cy + (obs.z / 1000) * 10 + 200 * scale;
+      const ow = obs.w * 300 * scale;
+      const oh = obs.h * 200 * scale;
+
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(ox - ow / 2, oy - oh, ow, oh);
+      ctx.strokeStyle = '#fca5a5';
+      ctx.strokeRect(ox - ow / 2, oy - oh, ow, oh);
+    });
+
+    // Draw Ship
+    const sx = cx + shipX * 180;
+    const sy = canvas.height - 50;
+
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(shipVX * 15);
+
+    // Glowing ship
+    ctx.fillStyle = '#38bdf8';
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = '#38bdf8';
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(16, 12);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(-16, 12);
+    ctx.closePath();
+    ctx.fill();
+
+    // Thruster flame
+    ctx.fillStyle = '#f59e0b';
+    ctx.shadowColor = '#f59e0b';
+    ctx.beginPath();
+    ctx.moveTo(-6, 8);
+    ctx.lineTo(6, 8);
+    ctx.lineTo(0, 18 + Math.random() * 8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+
+    if (isGameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ef4444';
+      ctx.font = 'bold 26px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('CRASHED!', canvas.width / 2, 190);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '16px monospace';
+      ctx.fillText(`Distance: ${distance}m`, canvas.width / 2, 225);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '14px monospace';
+      ctx.fillText('Press R to Retry', canvas.width / 2, 260);
+    }
+  }
+
+  requestAnimationFrame(update);
+</script>
+</body>
+</html>

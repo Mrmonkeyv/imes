@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Idle Cookie Empire</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #1c130d;
+      color: #fef3c7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    .wrapper {
+      display: flex;
+      width: 700px;
+      height: 480px;
+      max-width: 95vw;
+      max-height: 95vh;
+      background: #2a1d15;
+      border: 2px solid #78350f;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+    }
+    .left-section {
+      flex: 1.2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: radial-gradient(circle, #3d291d 0%, #20140c 100%);
+      border-right: 2px solid #78350f;
+      position: relative;
+    }
+    .cookie-count {
+      font-size: 26px;
+      font-weight: 800;
+      color: #fef08a;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    .cps-count {
+      font-size: 13px;
+      color: #d97706;
+      margin-bottom: 20px;
+    }
+    .big-cookie {
+      width: 170px;
+      height: 170px;
+      background: radial-gradient(circle, #d97706 20%, #b45309 80%);
+      border-radius: 50%;
+      position: relative;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4), inset -4px -4px 10px rgba(0,0,0,0.5), inset 4px 4px 10px rgba(255,255,255,0.3);
+      transition: transform 0.08s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .big-cookie:active {
+      transform: scale(0.94);
+    }
+    /* Choc chips */
+    .chip {
+      position: absolute;
+      width: 16px;
+      height: 14px;
+      background: #451a03;
+      border-radius: 50%;
+    }
+    .right-section {
+      flex: 1;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      background: #1c130d;
+      overflow-y: auto;
+    }
+    .store-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #f59e0b;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+      letter-spacing: 0.05em;
+    }
+    .store-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .store-item {
+      background: #2a1d15;
+      border: 1px solid #78350f;
+      padding: 10px 12px;
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .store-item:hover:not(.disabled) {
+      background: #3b281c;
+      border-color: #d97706;
+    }
+    .store-item.disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .item-info h4 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fef08a;
+    }
+    .item-info p {
+      font-size: 11px;
+      color: #92400e;
+    }
+    .item-cost {
+      font-size: 12px;
+      font-weight: bold;
+      color: #fbbf24;
+      font-variant-numeric: tabular-nums;
+    }
+    .item-count {
+      font-size: 18px;
+      font-weight: 800;
+      color: #78350f;
+      margin-left: 8px;
+    }
+    .floating-text {
+      position: absolute;
+      color: #fef08a;
+      font-weight: 800;
+      font-size: 18px;
+      pointer-events: none;
+      animation: floatUp 0.8s ease-out forwards;
+    }
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translate(0, 0); }
+      100% { opacity: 0; transform: translate(0, -50px); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrapper">
+  <div class="left-section" id="leftSection">
+    <div class="cookie-count" id="cookieCount">0 cookies</div>
+    <div class="cps-count" id="cpsCount">per second: 0</div>
+
+    <div class="big-cookie" id="cookie">
+      <div class="chip" style="top: 35px; left: 40px;"></div>
+      <div class="chip" style="top: 45px; right: 50px;"></div>
+      <div class="chip" style="bottom: 40px; left: 55px;"></div>
+      <div class="chip" style="bottom: 55px; right: 40px;"></div>
+      <div class="chip" style="top: 80px; left: 75px;"></div>
+      <div class="chip" style="top: 115px; left: 85px;"></div>
+    </div>
+  </div>
+
+  <div class="right-section">
+    <div class="store-title">Bakery Upgrades</div>
+    <div class="store-list" id="storeList"></div>
+  </div>
+</div>
+
+<script>
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function sound(freq) {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    } catch(e) {}
+  }
+
+  let cookies = 0;
+  let clickPower = 1;
+
+  const items = [
+    { id: 'cursor', name: 'Auto Cursor', cost: 15, cps: 0.5, count: 0 },
+    { id: 'grandma', name: 'Grandma', cost: 100, cps: 4, count: 0 },
+    { id: 'bakery', name: 'Neighborhood Bakery', cost: 1100, cps: 32, count: 0 },
+    { id: 'factory', name: 'Cookie Factory', cost: 12000, cps: 260, count: 0 },
+    { id: 'portal', name: 'Cookie Quantum Portal', cost: 130000, cps: 1400, count: 0 }
+  ];
+
+  function getCPS() {
+    return items.reduce((acc, item) => acc + item.count * item.cps, 0);
+  }
+
+  function clickCookie(e) {
+    cookies += clickPower;
+    sound(550);
+    renderStats();
+
+    // Floating +1
+    const float = document.createElement('div');
+    float.className = 'floating-text';
+    float.innerText = `+${clickPower}`;
+    const rect = document.getElementById('cookie').getBoundingClientRect();
+    const lRect = document.getElementById('leftSection').getBoundingClientRect();
+    float.style.left = (e ? e.clientX - lRect.left - 10 : 80) + 'px';
+    float.style.top = (e ? e.clientY - lRect.top - 15 : 120) + 'px';
+    document.getElementById('leftSection').appendChild(float);
+    setTimeout(() => float.remove(), 800);
+  }
+
+  function buyItem(idx) {
+    const item = items[idx];
+    if (cookies >= item.cost) {
+      cookies -= item.cost;
+      item.count++;
+      item.cost = Math.floor(item.cost * 1.15);
+      sound(750);
+      renderStore();
+      renderStats();
+    }
+  }
+
+  function renderStats() {
+    document.getElementById('cookieCount').innerText = `${Math.floor(cookies).toLocaleString()} cookies`;
+    document.getElementById('cpsCount').innerText = `per second: ${getCPS().toFixed(1)}`;
+  }
+
+  function renderStore() {
+    const list = document.getElementById('storeList');
+    list.innerHTML = '';
+    items.forEach((item, idx) => {
+      const el = document.createElement('div');
+      el.className = 'store-item' + (cookies < item.cost ? ' disabled' : '');
+      el.onclick = () => buyItem(idx);
+      el.innerHTML = `
+        <div class="item-info">
+          <h4>${item.name}</h4>
+          <p>+${item.cps} CPS each</p>
+        </div>
+        <div style="display: flex; align-items: center;">
+          <div class="item-cost">🍪 ${item.cost.toLocaleString()}</div>
+          <div class="item-count">${item.count}</div>
+        </div>
+      `;
+      list.appendChild(el);
+    });
+  }
+
+  document.getElementById('cookie').addEventListener('click', clickCookie);
+
+  // Game loop 10 times a second
+  setInterval(() => {
+    cookies += getCPS() / 10;
+    renderStats();
+    // Update store button disability states
+    const els = document.querySelectorAll('.store-item');
+    items.forEach((item, idx) => {
+      if (els[idx]) {
+        els[idx].classList.toggle('disabled', cookies < item.cost);
+      }
+    });
+  }, 100);
+
+  renderStore();
+  renderStats();
+</script>
+</body>
+</html>

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Flappy Bird Arcade</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    .game-container {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      border: 2px solid #334155;
+    }
+    canvas {
+      display: block;
+      background: #70c5ce;
+    }
+    .tip {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="game-container">
+  <canvas id="game" width="360" height="520"></canvas>
+</div>
+<div class="tip">Click, Tap, or Press Spacebar to Flap</div>
+
+<script>
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function sound(freq, duration = 0.08, type = 'sine') {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+  }
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  let state = 'START'; // START, PLAYING, GAMEOVER
+  let bird = { x: 60, y: 240, vy: 0, radius: 14 };
+  const gravity = 0.38;
+  const jump = -6.5;
+
+  let pipes = [];
+  let score = 0;
+  let best = parseInt(localStorage.getItem('apex_flappy_best') || '0', 10);
+  let frames = 0;
+
+  function resetGame() {
+    bird = { x: 60, y: 240, vy: 0, radius: 14 };
+    pipes = [];
+    score = 0;
+    frames = 0;
+    state = 'START';
+  }
+
+  function flap() {
+    if (state === 'START') {
+      state = 'PLAYING';
+      bird.vy = jump;
+      sound(400, 0.06);
+    } else if (state === 'PLAYING') {
+      bird.vy = jump;
+      sound(440, 0.06);
+    } else if (state === 'GAMEOVER') {
+      resetGame();
+    }
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.key === ' ' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      flap();
+    }
+  });
+  canvas.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    flap();
+  });
+
+  function update() {
+    frames++;
+
+    if (state === 'START') {
+      bird.y = 240 + Math.sin(frames * 0.08) * 8;
+    } else if (state === 'PLAYING') {
+      bird.vy += gravity;
+      bird.y += bird.vy;
+
+      // Pipe spawn
+      if (frames % 100 === 0) {
+        const gap = 120;
+        const top = Math.floor(Math.random() * (canvas.height - gap - 160)) + 40;
+        pipes.push({
+          x: canvas.width,
+          top: top,
+          bottom: canvas.height - top - gap,
+          passed: false
+        });
+      }
+
+      // Move pipes
+      for (let i = pipes.length - 1; i >= 0; i--) {
+        const p = pipes[i];
+        p.x -= 2.2;
+
+        // Collision check
+        const pipeW = 54;
+        if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + pipeW) {
+          if (bird.y - bird.radius < p.top || bird.y + bird.radius > canvas.height - p.bottom - 40) {
+            die();
+          }
+        }
+
+        // Score
+        if (!p.passed && p.x + pipeW < bird.x) {
+          p.passed = true;
+          score++;
+          sound(700, 0.1, 'triangle');
+          if (score > best) {
+            best = score;
+            localStorage.setItem('apex_flappy_best', best.toString());
+          }
+        }
+
+        if (p.x + pipeW < 0) {
+          pipes.splice(i, 1);
+        }
+      }
+
+      // Floor & ceiling hit
+      if (bird.y + bird.radius >= canvas.height - 40 || bird.y - bird.radius <= 0) {
+        die();
+      }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function die() {
+    state = 'GAMEOVER';
+    sound(150, 0.3, 'sawtooth');
+  }
+
+  function draw() {
+    // Sky
+    ctx.fillStyle = '#70c5ce';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // City silhouette background
+    ctx.fillStyle = '#bde5d9';
+    for (let i = 0; i < 6; i++) {
+      ctx.fillRect(i * 70, canvas.height - 130 - (i % 3) * 20, 60, 100);
+    }
+
+    // Pipes
+    pipes.forEach(p => {
+      ctx.fillStyle = '#73bf2e';
+      ctx.strokeStyle = '#558022';
+      ctx.lineWidth = 3;
+
+      // Top pipe
+      ctx.fillRect(p.x, 0, 54, p.top);
+      ctx.strokeRect(p.x, 0, 54, p.top);
+      ctx.fillRect(p.x - 3, p.top - 20, 60, 20);
+      ctx.strokeRect(p.x - 3, p.top - 20, 60, 20);
+
+      // Bottom pipe
+      const bY = canvas.height - p.bottom - 40;
+      ctx.fillRect(p.x, bY, 54, p.bottom);
+      ctx.strokeRect(p.x, bY, 54, p.bottom);
+      ctx.fillRect(p.x - 3, bY, 60, 20);
+      ctx.strokeRect(p.x - 3, bY, 60, 20);
+    });
+
+    // Ground
+    ctx.fillStyle = '#ded895';
+    ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+    ctx.fillStyle = '#73bf2e';
+    ctx.fillRect(0, canvas.height - 40, canvas.width, 10);
+    ctx.fillStyle = '#558022';
+    ctx.fillRect(0, canvas.height - 30, canvas.width, 3);
+
+    // Bird
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    const angle = state === 'PLAYING' ? Math.min(Math.PI / 4, Math.max(-Math.PI / 4, bird.vy * 0.08)) : 0;
+    ctx.rotate(angle);
+
+    // Body
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath();
+    ctx.arc(0, 0, bird.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ca8a04';
+    ctx.stroke();
+
+    // Eye
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(6, -4, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(7, -4, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Beak
+    ctx.fillStyle = '#f97316';
+    ctx.beginPath();
+    ctx.moveTo(8, 2);
+    ctx.lineTo(16, 4);
+    ctx.lineTo(8, 7);
+    ctx.closePath();
+    ctx.fill();
+
+    // Wing
+    ctx.fillStyle = '#eab308';
+    ctx.beginPath();
+    ctx.ellipse(-4, 2, 6, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Score HUD
+    if (state === 'PLAYING') {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 4;
+      ctx.font = '800 36px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.strokeText(score, canvas.width / 2, 60);
+      ctx.fillText(score, canvas.width / 2, 60);
+    } else if (state === 'START') {
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 4;
+      ctx.font = '800 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.strokeText('TAP TO JUMP', canvas.width / 2, 170);
+      ctx.fillText('TAP TO JUMP', canvas.width / 2, 170);
+    } else if (state === 'GAMEOVER') {
+      // Game over card
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.roundRect(40, 140, 280, 200, 12);
+      ctx.fill();
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = '#ef4444';
+      ctx.font = '800 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('GAME OVER', canvas.width / 2, 190);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 15px sans-serif';
+      ctx.fillText('SCORE', canvas.width / 2, 226);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 22px sans-serif';
+      ctx.fillText(score, canvas.width / 2, 252);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 15px sans-serif';
+      ctx.fillText('BEST SCORE', canvas.width / 2, 284);
+      ctx.fillStyle = '#facc15';
+      ctx.font = '800 22px sans-serif';
+      ctx.fillText(best, canvas.width / 2, 310);
+    }
+  }
+
+  requestAnimationFrame(update);
+</script>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Space Invaders 1978</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .hud {
+      display: flex;
+      justify-content: space-between;
+      width: 480px;
+      max-width: 95vw;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #a855f7;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+    canvas {
+      background: #000000;
+      border: 2px solid #7c3aed;
+      border-radius: 8px;
+      box-shadow: 0 0 25px rgba(124, 58, 237, 0.25);
+      display: block;
+      max-width: 95vw;
+    }
+    .tip {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="hud">
+  <div>Score: <span id="score">0000</span></div>
+  <div>Lives: <span id="lives">♥♥♥</span></div>
+  <div>High: <span id="high">0000</span></div>
+</div>
+
+<canvas id="arcade" width="480" height="520"></canvas>
+<div class="tip">← / → Move · Spacebar Fire · P Pause</div>
+
+<script>
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  function sound(freq, duration = 0.08, type = 'square') {
+    try {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    } catch(e) {}
+  }
+
+  const canvas = document.getElementById('arcade');
+  const ctx = canvas.getContext('2d');
+
+  let score = 0;
+  let lives = 3;
+  let highScore = parseInt(localStorage.getItem('apex_space_invaders_hi') || '0', 10);
+  document.getElementById('high').innerText = String(highScore).padStart(4, '0');
+
+  let player = { x: 220, y: 470, w: 32, h: 18, speed: 4.5 };
+  let lasers = [];
+  let alienLasers = [];
+  let aliens = [];
+  let alienDir = 1;
+  let alienStepY = 0;
+  let alienMoveTimer = 0;
+  let alienMoveInterval = 40;
+  let mysteryShip = null;
+  let stars = [];
+  let isGameOver = false;
+
+  for (let i = 0; i < 40; i++) {
+    stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 1.5 });
+  }
+
+  function initAliens() {
+    aliens = [];
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 8; c++) {
+        aliens.push({
+          x: 40 + c * 48,
+          y: 60 + r * 36,
+          w: 26,
+          h: 20,
+          row: r,
+          alive: true
+        });
+      }
+    }
+  }
+
+  function shoot() {
+    if (lasers.length < 2 && !isGameOver) {
+      lasers.push({ x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 10, speed: 7 });
+      sound(800, 0.05);
+    }
+  }
+
+  let keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      shoot();
+    }
+  });
+  window.addEventListener('keyup', e => {
+    keys[e.key] = false;
+  });
+
+  function update() {
+    if (!isGameOver) {
+      if (keys['ArrowLeft'] || keys['a']) player.x = Math.max(10, player.x - player.speed);
+      if (keys['ArrowRight'] || keys['d']) player.x = Math.min(canvas.width - player.w - 10, player.x + player.speed);
+
+      // Move player lasers
+      for (let i = lasers.length - 1; i >= 0; i--) {
+        const l = lasers[i];
+        l.y -= l.speed;
+
+        // Check hit alien
+        for (let a of aliens) {
+          if (a.alive && l.x > a.x && l.x < a.x + a.w && l.y > a.y && l.y < a.y + a.h) {
+            a.alive = false;
+            lasers.splice(i, 1);
+            score += (4 - a.row) * 10;
+            document.getElementById('score').innerText = String(score).padStart(4, '0');
+            sound(300, 0.1, 'noise');
+            break;
+          }
+        }
+
+        // Check hit mystery ship
+        if (mysteryShip && l.x > mysteryShip.x && l.x < mysteryShip.x + mysteryShip.w && l.y > mysteryShip.y && l.y < mysteryShip.y + mysteryShip.h) {
+          score += 150;
+          mysteryShip = null;
+          lasers.splice(i, 1);
+          sound(950, 0.2);
+          document.getElementById('score').innerText = String(score).padStart(4, '0');
+        }
+
+        if (l && l.y < 0) lasers.splice(i, 1);
+      }
+
+      // Alien Movement
+      alienMoveTimer++;
+      const aliveCount = aliens.filter(a => a.alive).length;
+      alienMoveInterval = Math.max(8, Math.floor(aliveCount * 0.9));
+
+      if (alienMoveTimer > alienMoveInterval) {
+        alienMoveTimer = 0;
+        let hitEdge = false;
+        aliens.forEach(a => {
+          if (a.alive) {
+            if ((alienDir === 1 && a.x + a.w > canvas.width - 20) || (alienDir === -1 && a.x < 20)) {
+              hitEdge = true;
+            }
+          }
+        });
+
+        if (hitEdge) {
+          alienDir *= -1;
+          aliens.forEach(a => a.y += 16);
+          sound(150, 0.05);
+        } else {
+          aliens.forEach(a => a.x += alienDir * 12);
+          sound(200, 0.05);
+        }
+
+        // Alien shooting
+        if (Math.random() < 0.4 && aliveCount > 0) {
+          const living = aliens.filter(a => a.alive);
+          const shooter = living[Math.floor(Math.random() * living.length)];
+          alienLasers.push({ x: shooter.x + shooter.w / 2, y: shooter.y + shooter.h, w: 3, h: 8, speed: 4.5 });
+        }
+      }
+
+      // Move alien lasers
+      for (let i = alienLasers.length - 1; i >= 0; i--) {
+        const al = alienLasers[i];
+        al.y += al.speed;
+
+        // Hit player
+        if (al.x > player.x && al.x < player.x + player.w && al.y > player.y && al.y < player.y + player.h) {
+          alienLasers.splice(i, 1);
+          lives--;
+          sound(100, 0.3, 'sawtooth');
+          document.getElementById('lives').innerText = '♥'.repeat(Math.max(0, lives));
+          if (lives <= 0) {
+            isGameOver = true;
+          }
+          break;
+        }
+
+        if (al.y > canvas.height) alienLasers.splice(i, 1);
+      }
+
+      // Check if aliens reach player
+      if (aliens.some(a => a.alive && a.y + a.h >= player.y)) {
+        isGameOver = true;
+      }
+
+      // Next wave check
+      if (aliveCount === 0) {
+        initAliens();
+      }
+    }
+
+    draw();
+    requestAnimationFrame(update);
+  }
+
+  function draw() {
+    ctx.fillStyle = '#05050e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Stars
+    ctx.fillStyle = '#ffffff';
+    stars.forEach(s => ctx.fillRect(s.x, s.y, s.size, s.size));
+
+    // Player cannon
+    ctx.fillStyle = '#22c55e';
+    ctx.fillRect(player.x, player.y + 6, player.w, player.h - 6);
+    ctx.fillRect(player.x + player.w / 2 - 3, player.y, 6, 6);
+
+    // Player Lasers
+    ctx.fillStyle = '#38bdf8';
+    lasers.forEach(l => ctx.fillRect(l.x, l.y, l.w, l.h));
+
+    // Alien Lasers
+    ctx.fillStyle = '#ef4444';
+    alienLasers.forEach(al => ctx.fillRect(al.x, al.y, al.w, al.h));
+
+    // Aliens
+    aliens.forEach(a => {
+      if (a.alive) {
+        ctx.fillStyle = ['#f43f5e', '#a855f7', '#06b6d4', '#eab308'][a.row];
+        // Retro alien pixel shape
+        ctx.fillRect(a.x + 4, a.y, a.w - 8, a.h - 4);
+        ctx.fillRect(a.x, a.y + 4, a.w, a.h - 8);
+        ctx.fillRect(a.x + 6, a.y + a.h - 4, 4, 4);
+        ctx.fillRect(a.x + a.w - 10, a.y + a.h - 4, 4, 4);
+        // Eyes
+        ctx.fillStyle = '#05050e';
+        ctx.fillRect(a.x + 6, a.y + 6, 3, 3);
+        ctx.fillRect(a.x + a.w - 9, a.y + 6, 3, 3);
+      }
+    });
+
+    if (isGameOver) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#ef4444';
+      ctx.font = '24px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('MISSION FAILED', canvas.width / 2, 240);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '14px monospace';
+      ctx.fillText('Press R to Restart', canvas.width / 2, 270);
+    }
+  }
+
+  window.addEventListener('keydown', e => {
+    if (e.key === 'r' || e.key === 'R') {
+      score = 0;
+      lives = 3;
+      isGameOver = false;
+      document.getElementById('score').innerText = '0000';
+      document.getElementById('lives').innerText = '♥♥♥';
+      initAliens();
+    }
+  });
+
+  initAliens();
+  requestAnimationFrame(update);
+</script>
+</body>
+</html>
